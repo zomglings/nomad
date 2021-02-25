@@ -134,7 +134,6 @@ github.com/bgentry/speakeasy
 # github.com/bmatcuk/doublestar v1.1.5
 github.com/bmatcuk/doublestar
 # github.com/boltdb/bolt v1.3.1
-## explicit
 github.com/boltdb/bolt
 # github.com/cespare/xxhash/v2 v2.1.1
 github.com/cespare/xxhash/v2
@@ -787,6 +786,9 @@ github.com/zclconf/go-cty/cty/set
 # github.com/zclconf/go-cty-yaml v1.0.2
 ## explicit
 github.com/zclconf/go-cty-yaml
+# go.etcd.io/bbolt v1.3.3
+## explicit
+go.etcd.io/bbolt
 # go.opencensus.io v0.22.1-0.20190713072201-b4a14686f0a9
 ## explicit
 go.opencensus.io

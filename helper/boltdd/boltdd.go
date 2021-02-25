@@ -8,9 +8,9 @@ import (
 	"os"
 	"sync"
 
-	"github.com/boltdb/bolt"
 	"github.com/hashicorp/go-msgpack/codec"
 	"github.com/hashicorp/nomad/nomad/structs"
+	bolt "go.etcd.io/bbolt"
 	"golang.org/x/crypto/blake2b"
 )
 
