@@ -315,6 +315,14 @@ func (f *NetworkFingerprint) createNetworkResources(throughput int, intf *net.In
 // Returns the interface with the name passed by user. If the name is blank, we
 // use the interface attached to the default route.
 func (f *NetworkFingerprint) findInterface(deviceName string) (*net.Interface, error) {
+	if deviceName != "" {
+		parsed, err := parseSingleInterfaceTemplate(deviceName)
+		if err != nil {
+			return nil, err
+		}
+		deviceName = parsed
+	}
+
 	// If we aren't given a device, look it up by using the interface with the default route
 	if deviceName == "" {
 		ri, err := sockaddr.NewRouteInfo()
@@ -333,4 +341,23 @@ func (f *NetworkFingerprint) findInterface(deviceName string) (*net.Interface, e
 	}
 
 	return f.interfaceDetector.InterfaceByName(deviceName)
+}
+
+// parseSingleInterfaceTemplate parses a go-sockaddr template and returns an
+// error if it doesn't result in a single value.
+func parseSingleInterfaceTemplate(tpl string) (string, error) {
+	out, err := template.Parse(tpl)
+	if err != nil {
+		return "", err
+	}
+
+	ifaces := strings.Split(out, " ")
+	switch len(ifaces) {
+	case 0:
+		return "", fmt.Errorf("template %q returned no interface", tpl)
+	case 1:
+		return ifaces[0], nil
+	default:
+		return "", fmt.Errorf("template %q returned more than 1 interface", tpl)
+	}
 }

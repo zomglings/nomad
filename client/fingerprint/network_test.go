@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/hashicorp/nomad/client/config"
@@ -485,4 +486,98 @@ func TestNetworkFingerPrint_MultipleAliases(t *testing.T) {
 	sort.Strings(expected)
 	sort.Strings(aliases)
 	require.Equal(t, expected, aliases, "host networks should match aliases")
+}
+
+func TestNetworkFingerPrint_TemplateInterface(t *testing.T) {
+	testCases := []struct {
+		name        string
+		template    string
+		detector    NetworkInterfaceDetector
+		expectedIP  string
+		expectedErr string
+	}{
+		{
+			name:       "templating",
+			template:   `{{ printf "eth3" }}`,
+			detector:   &NetworkInterfaceDetectorMultipleInterfaces{},
+			expectedIP: "169.254.155.20",
+		},
+		{
+			name:       "no templating",
+			template:   "eth3",
+			detector:   &NetworkInterfaceDetectorMultipleInterfaces{},
+			expectedIP: "169.254.155.20",
+		},
+		{
+			name:        "invalid template",
+			template:    `{{ Invalid }}`,
+			detector:    &NetworkInterfaceDetectorMultipleInterfaces{},
+			expectedErr: "unable to parse template",
+		},
+		{
+			name:        "multiple results",
+			template:    `{{ printf "eth3" }} eth42`,
+			detector:    &NetworkInterfaceDetectorMultipleInterfaces{},
+			expectedErr: "returned more than 1 interface",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &NetworkFingerprint{logger: testlog.HCLogger(t), interfaceDetector: tc.detector}
+			node := &structs.Node{
+				Attributes: make(map[string]string),
+			}
+			cfg := &config.Config{NetworkSpeed: 100, NetworkInterface: tc.template}
+
+			request := &FingerprintRequest{Config: cfg, Node: node}
+			var response FingerprintResponse
+			err := f.Fingerprint(request, &response)
+			if err != nil {
+				if tc.expectedErr == "" {
+					t.Fatalf("err: %v", err)
+				}
+				if !strings.Contains(err.Error(), tc.expectedErr) {
+					t.Fatalf("expected error %q to contain %q", err, tc.expectedErr)
+				}
+				return
+			}
+
+			if !response.Detected {
+				t.Fatalf("expected response to be applicable")
+			}
+
+			attributes := response.Attributes
+			if len(attributes) == 0 {
+				t.Fatalf("should apply")
+			}
+
+			assertNodeAttributeContains(t, attributes, "unique.network.ip-address")
+
+			ip := attributes["unique.network.ip-address"]
+			match := net.ParseIP(ip)
+			if match == nil {
+				t.Fatalf("Bad IP match: %s", ip)
+			}
+
+			if response.Resources == nil || len(response.Resources.Networks) == 0 {
+				t.Fatal("Expected to find Network Resources")
+			}
+
+			// Test at least the first Network Resource
+			net := response.Resources.Networks[0]
+			if net.IP != tc.expectedIP {
+				t.Fatalf("Expected IP %q, got %q", tc.expectedIP, net.IP)
+			}
+			if net.CIDR == "" {
+				t.Fatal("Expected Network Resource to have a CIDR")
+			}
+			if net.Device == "" {
+				t.Fatal("Expected Network Resource to have a Device Name")
+			}
+			if net.MBits == 0 {
+				t.Fatal("Expected Network Resource to have a non-zero bandwidth")
+			}
+		})
+	}
 }
