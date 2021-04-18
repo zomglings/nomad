@@ -84,7 +84,7 @@ func assertJobWatcherOps(t *testing.T, jw DrainingJobWatcher, drained, migrated 
 			migrationsChecked = true
 			require.Lenf(t, migrations, migrated,
 				"expected %d migrations but found %d", migrated, len(migrations))
-		case <-time.After(10 * time.Millisecond):
+		case <-time.After(100 * time.Millisecond):
 			if !drainsChecked && drained > 0 {
 				t.Fatalf("expected %d drains but none happened", drained)
 			}
@@ -735,4 +735,63 @@ func TestHandleTaskGroup_GarbageCollectedNode(t *testing.T) {
 	require.Empty(res.drain)
 	require.Empty(res.migrated)
 	require.True(res.done)
+}
+
+// TestDrainingJobWatcher_DrainJobs_Namespace asserts that allocs across
+// namespaces are migrated
+func TestDrainingJobWatcher_DrainJobs_Namespace(t *testing.T) {
+	t.Parallel()
+
+	state := state.TestStateStore(t)
+	jobWatcher, cancelWatcher := testDrainingJobWatcher(t, state)
+	defer cancelWatcher()
+	drainingNode, _ := testNodes(t, state)
+
+	idx := uint64(101)
+
+	ns1 := mock.Namespace()
+	ns2 := mock.Namespace()
+	nses := []*structs.Namespace{ns1, ns2}
+	require.NoError(t, state.UpsertNamespaces(idx, nses))
+	idx++
+
+	//jobs := []*structs.Job{}
+	jnss := []structs.NamespacedID{}
+	allocs := []*structs.Allocation{}
+
+	for _, ns := range nses {
+		job := mock.Job()
+		job.Namespace = ns.Name
+		job.ID = "example"
+		job.Name = "example"
+		job.TaskGroups[0].Migrate.MaxParallel = 3
+		job.TaskGroups[0].Count = 1
+		require.Nil(t, state.UpsertJob(structs.MsgTypeTestSetup, idx, job))
+		idx++
+
+		a := mock.Alloc()
+		a.JobID = job.ID
+		a.Namespace = job.Namespace
+		a.Job = job
+		a.TaskGroup = job.TaskGroups[0].Name
+		a.NodeID = drainingNode.ID
+		a.DeploymentStatus = &structs.AllocDeploymentStatus{
+			Healthy: helper.BoolToPtr(true),
+		}
+
+		jnss = append(jnss, structs.NewNamespacedID(job.ID, ns.Name))
+		allocs = append(allocs, a)
+	}
+
+	require.Nil(t, state.UpsertAllocs(structs.MsgTypeTestSetup, idx, allocs))
+	idx++
+
+	// Only register jobs with watcher after creating all data models as
+	// once the watcher starts we need to track the index carefully for
+	// updating the batch future
+	jobWatcher.RegisterJobs(jnss)
+
+	drainReq, _ := assertJobWatcherOps(t, jobWatcher, 2, 0)
+	require.Len(t, drainReq.Allocs, 2)
+
 }
