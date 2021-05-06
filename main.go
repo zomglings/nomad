@@ -9,6 +9,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	humbug "github.com/bugout-dev/humbug/go/pkg"
+
 	// These packages have init() funcs which check os.Args and drop directly
 	// into their command logic. This is because they are run as separate
 	// processes along side of a task. By early importing them we can avoid
@@ -18,6 +20,7 @@ import (
 	_ "github.com/hashicorp/nomad/drivers/shared/executor"
 
 	"github.com/hashicorp/nomad/command"
+	"github.com/hashicorp/nomad/reporting"
 	"github.com/hashicorp/nomad/version"
 	colorable "github.com/mattn/go-colorable"
 	"github.com/mitchellh/cli"
@@ -84,7 +87,39 @@ func main() {
 }
 
 func Run(args []string) int {
-	return RunCustom(args)
+	processedArgs := make([]string, len(args))
+	currentArg := 0
+	for _, arg := range args {
+		if arg == "-reporting" || arg == "--reporting" || arg == "-report" || arg == "--report" {
+			reporting.UserConsentState = true
+		} else {
+			processedArgs[currentArg] = arg
+			currentArg++
+		}
+	}
+
+	invocationPublished := make(chan bool)
+	exitPublished := make(chan bool)
+	reporting.InitializeReporter()
+	go func() {
+		systemReport := humbug.SystemReport()
+		commandReport := reporting.CommandInvokedReport(os.Args)
+		reporting.Reporter.Publish(systemReport)
+		reporting.Reporter.Publish(commandReport)
+		invocationPublished <- true
+	}()
+
+	result := RunCustom(processedArgs[:currentArg])
+
+	go func() {
+		<-invocationPublished
+		exitReport := reporting.CommandCompletedReport(os.Args, result)
+		reporting.Reporter.Publish(exitReport)
+		exitPublished <- true
+	}()
+
+	<-exitPublished
+	return result
 }
 
 func RunCustom(args []string) int {

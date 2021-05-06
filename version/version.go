@@ -19,7 +19,7 @@ var (
 	VersionPrerelease = "dev"
 
 	// VersionMetadata is metadata further describing the build type.
-	VersionMetadata = ""
+	VersionMetadata = "bugout-reporting"
 )
 
 // VersionInfo
