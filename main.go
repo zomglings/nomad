@@ -185,6 +185,12 @@ func RunCustom(args []string) int {
 
 	<-exitPublished
 
+	if exitCode != 0 && !reporting.CheckUserConsent() {
+		reportingInvocation := fmt.Sprintf("nomad %s -report", strings.Join(args, " "))
+		reportingMessage := fmt.Sprintf("\nTo report this issue, re-run your command with the -report flag set:\n\t$ %s\n", reportingInvocation)
+		metaPtr.Ui.Warn(reportingMessage)
+	}
+
 	return exitCode
 }
 
