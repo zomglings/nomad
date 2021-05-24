@@ -87,6 +87,10 @@ func main() {
 }
 
 func Run(args []string) int {
+	return RunCustom(args)
+}
+
+func RunCustom(args []string) int {
 	processedArgs := make([]string, len(args))
 	currentArg := 0
 	for _, arg := range args {
@@ -109,22 +113,11 @@ func Run(args []string) int {
 		invocationPublished <- true
 	}()
 
-	result := RunCustom(processedArgs[:currentArg])
-
-	go func() {
-		<-invocationPublished
-		exitReport := reporting.CommandCompletedReport(os.Args, result)
-		reporting.Reporter.Publish(exitReport)
-		exitPublished <- true
-	}()
-
-	<-exitPublished
-	return result
-}
-
-func RunCustom(args []string) int {
 	// Parse flags into env vars for global use
-	args = setupEnv(args)
+	args = setupEnv(processedArgs[:currentArg])
+
+	var errLines bytes.Buffer
+	errWriter := io.MultiWriter(os.Stderr, &errLines)
 
 	// Create the meta object
 	metaPtr := new(command.Meta)
@@ -139,7 +132,7 @@ func RunCustom(args []string) int {
 	metaPtr.Ui = &cli.BasicUi{
 		Reader:      os.Stdin,
 		Writer:      colorable.NewColorableStdout(),
-		ErrorWriter: colorable.NewColorableStderr(),
+		ErrorWriter: errWriter,
 	}
 
 	// The Nomad agent never outputs color
@@ -179,6 +172,16 @@ func RunCustom(args []string) int {
 		fmt.Fprintf(os.Stderr, "Error executing CLI: %s\n", err.Error())
 		return 1
 	}
+
+	go func() {
+		errMessage := errLines.String()
+		<-invocationPublished
+		exitReport := reporting.CommandCompletedReport(os.Args, exitCode, errMessage)
+		reporting.Reporter.Publish(exitReport)
+		exitPublished <- true
+	}()
+
+	<-exitPublished
 
 	return exitCode
 }
