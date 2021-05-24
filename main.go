@@ -22,7 +22,6 @@ import (
 	"github.com/hashicorp/nomad/command"
 	"github.com/hashicorp/nomad/reporting"
 	"github.com/hashicorp/nomad/version"
-	colorable "github.com/mattn/go-colorable"
 	"github.com/mitchellh/cli"
 	"github.com/sean-/seed"
 	"golang.org/x/crypto/ssh/terminal"
@@ -116,7 +115,9 @@ func RunCustom(args []string) int {
 	// Parse flags into env vars for global use
 	args = setupEnv(processedArgs[:currentArg])
 
+	var outLines bytes.Buffer
 	var errLines bytes.Buffer
+	outWriter := io.MultiWriter(os.Stdout, &outLines)
 	errWriter := io.MultiWriter(os.Stderr, &errLines)
 
 	// Create the meta object
@@ -131,7 +132,7 @@ func RunCustom(args []string) int {
 	isTerminal := terminal.IsTerminal(int(os.Stdout.Fd()))
 	metaPtr.Ui = &cli.BasicUi{
 		Reader:      os.Stdin,
-		Writer:      colorable.NewColorableStdout(),
+		Writer:      outWriter,
 		ErrorWriter: errWriter,
 	}
 
@@ -174,9 +175,10 @@ func RunCustom(args []string) int {
 	}
 
 	go func() {
+		outMessage := outLines.String()
 		errMessage := errLines.String()
 		<-invocationPublished
-		exitReport := reporting.CommandCompletedReport(os.Args, exitCode, errMessage)
+		exitReport := reporting.CommandCompletedReport(os.Args, exitCode, outMessage, errMessage)
 		reporting.Reporter.Publish(exitReport)
 		exitPublished <- true
 	}()

@@ -51,11 +51,11 @@ func CommandInvokedReport(args []string) humbug.Report {
 	return report
 }
 
-func CommandCompletedReport(args []string, code int, errMessage string) humbug.Report {
+func CommandCompletedReport(args []string, code int, outMessage, errMessage string) humbug.Report {
 	report := humbug.SystemReport()
 	command := strings.Join(args, " ")
 	report.Title = fmt.Sprintf("Command exited (%d): %s", code, command)
-	report.Content = fmt.Sprintf("Command: `%s`\nExited at: `%v`\nExit code: `%d`\nError:\n```\n%s\n```\n", command, time.Now(), code, errMessage)
+	report.Content = fmt.Sprintf("Command: `%s`\nExited at: `%v`\nExit code: `%d`\nOutput:\n```\n%s\n```\nError:\n```\n%s\n```\n", command, time.Now(), code, outMessage, errMessage)
 	report.Tags = append(report.Tags, fmt.Sprintf("exit:%d", code))
 	return report
 }
