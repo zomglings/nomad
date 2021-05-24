@@ -9,6 +9,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	humbug "github.com/bugout-dev/humbug/go/pkg"
+
 	// These packages have init() funcs which check os.Args and drop directly
 	// into their command logic. This is because they are run as separate
 	// processes along side of a task. By early importing them we can avoid
@@ -18,8 +20,8 @@ import (
 	_ "github.com/hashicorp/nomad/drivers/shared/executor"
 
 	"github.com/hashicorp/nomad/command"
+	"github.com/hashicorp/nomad/reporting"
 	"github.com/hashicorp/nomad/version"
-	colorable "github.com/mattn/go-colorable"
 	"github.com/mitchellh/cli"
 	"github.com/sean-/seed"
 	"golang.org/x/crypto/ssh/terminal"
@@ -88,8 +90,35 @@ func Run(args []string) int {
 }
 
 func RunCustom(args []string) int {
+	processedArgs := make([]string, len(args))
+	currentArg := 0
+	for _, arg := range args {
+		if arg == "-reporting" || arg == "--reporting" || arg == "-report" || arg == "--report" {
+			reporting.UserConsentState = true
+		} else {
+			processedArgs[currentArg] = arg
+			currentArg++
+		}
+	}
+
+	invocationPublished := make(chan bool)
+	exitPublished := make(chan bool)
+	reporting.InitializeReporter()
+	go func() {
+		systemReport := humbug.SystemReport()
+		commandReport := reporting.CommandInvokedReport(os.Args)
+		reporting.Reporter.Publish(systemReport)
+		reporting.Reporter.Publish(commandReport)
+		invocationPublished <- true
+	}()
+
 	// Parse flags into env vars for global use
-	args = setupEnv(args)
+	args = setupEnv(processedArgs[:currentArg])
+
+	var outLines bytes.Buffer
+	var errLines bytes.Buffer
+	outWriter := io.MultiWriter(os.Stdout, &outLines)
+	errWriter := io.MultiWriter(os.Stderr, &errLines)
 
 	// Create the meta object
 	metaPtr := new(command.Meta)
@@ -103,8 +132,8 @@ func RunCustom(args []string) int {
 	isTerminal := terminal.IsTerminal(int(os.Stdout.Fd()))
 	metaPtr.Ui = &cli.BasicUi{
 		Reader:      os.Stdin,
-		Writer:      colorable.NewColorableStdout(),
-		ErrorWriter: colorable.NewColorableStderr(),
+		Writer:      outWriter,
+		ErrorWriter: errWriter,
 	}
 
 	// The Nomad agent never outputs color
@@ -143,6 +172,23 @@ func RunCustom(args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error executing CLI: %s\n", err.Error())
 		return 1
+	}
+
+	go func() {
+		outMessage := outLines.String()
+		errMessage := errLines.String()
+		<-invocationPublished
+		exitReport := reporting.CommandCompletedReport(os.Args, exitCode, outMessage, errMessage)
+		reporting.Reporter.Publish(exitReport)
+		exitPublished <- true
+	}()
+
+	<-exitPublished
+
+	if exitCode != 0 && !reporting.CheckUserConsent() {
+		reportingInvocation := fmt.Sprintf("nomad %s -report", strings.Join(args, " "))
+		reportingMessage := fmt.Sprintf("\nTo report this issue, re-run your command with the -report flag set:\n\t$ %s\n", reportingInvocation)
+		metaPtr.Ui.Warn(reportingMessage)
 	}
 
 	return exitCode
